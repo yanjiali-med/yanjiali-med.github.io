@@ -9,6 +9,7 @@
 
 import { medicalKB, fallbackResponse } from "../data/medicalKnowledge.js";
 import { tryConsume, getUsage } from "./rateLimiter.js";
+import { fetchRealtimeInfo, buildRealtimeAnswer, logQuery, findRelatedFeedback } from "./realtimeQA.js";
 
 // ===== 分词 =====
 // 按非汉字/字母字符切分，保留 2 字以上词，并保留连续中文片段
@@ -37,6 +38,15 @@ const EMERGENCY_PATTERNS = [
 const SYMPTOM_HINTS = ["怎么办", "怎么处理", "怎么回事", "是什么原因", "为什么", "是不是", "严重吗", "需要治吗", "要看医生吗"];
 const MEDICATION_HINTS = ["药", "吃", "服用", "剂量", "用量", "怎么用", "能吃", "可以吃", "副作用", "禁忌"];
 
+// 孕产期相关咨询关键词（单关键词命中即判定，组合关键词作补充）
+const PREGNANCY_HINTS = [
+  "怀孕", "孕妇", "孕期", "怀孕期", "妊娠", "产妇", "哺乳期", "坐月子", "待产",
+  "产检", "羊水", "宫缩", "见红", "破水", "备孕", "孕吐", "胎儿", "孕早期", "孕中期",
+  "孕晚期", "预产期", "剖腹产", "剖宫产", "顺产", "引产", "流产", "保胎",
+];
+const PREGNANCY_COMBO_PARTNER = ["老婆", "妻子", "媳妇", "夫人"];
+const PREGNANCY_COMBO_ACTION = ["快生", "要生", "生了", "怀孕", "孕期"];
+
 function detectIntent(query) {
   const q = query.toLowerCase();
   // 紧急情况优先
@@ -44,6 +54,17 @@ function detectIntent(query) {
     if (p.kw.some((k) => q.includes(k.toLowerCase()))) {
       return { type: "emergency", reason: p.reason, hit: p.kw.find((k) => q.includes(k.toLowerCase())) };
     }
+  }
+  // 孕产期咨询：单关键词命中即触发
+  const pregHit = PREGNANCY_HINTS.find((k) => q.includes(k));
+  if (pregHit) {
+    return { type: "pregnancy", reason: "孕产期相关咨询，超出本系统边界", hit: pregHit };
+  }
+  // 孕产期咨询：组合判断（"老婆/妻子"+"快生/怀孕"等）
+  const hasPartner = PREGNANCY_COMBO_PARTNER.some((k) => q.includes(k));
+  const hasAction = PREGNANCY_COMBO_ACTION.some((k) => q.includes(k));
+  if (hasPartner && hasAction) {
+    return { type: "pregnancy", reason: "孕产期相关咨询，超出本系统边界", hit: "组合匹配" };
   }
   // 用药咨询
   if (MEDICATION_HINTS.some((h) => q.includes(h))) {
@@ -115,7 +136,29 @@ function extractHintKeywords(query) {
 }
 
 // 智能化 fallback：基于原 query 提取关键词，主动推荐候选条目
-function buildSmartFallback(query) {
+// 低置信度时先尝试实时检索（Wikipedia），失败再用本地 fallback 推荐
+async function buildSmartFallbackAsync(query) {
+  // 1. 先尝试实时检索
+  try {
+    const realtime = await fetchRealtimeInfo(query, 4000);
+    if (realtime.ok) {
+      const realtimeAnswer = buildRealtimeAnswer(query, realtime);
+      if (realtimeAnswer) {
+        logQuery(query, "realtime");
+        return realtimeAnswer;
+      }
+    }
+  } catch {
+    // 实时检索失败 → 降级到本地推荐
+  }
+
+  // 2. 本地 fallback 推荐
+  logQuery(query, "fallback");
+  return buildLocalFallback(query);
+}
+
+// 原本地 fallback：从原 query 提取关键词，主动推荐相关条目
+function buildLocalFallback(query) {
   const hints = extractHintKeywords(query);
   // 用关键词做一次宽松搜索，取最多 3 条作为"您可能想问"
   const candidates = [];
@@ -145,6 +188,65 @@ function buildSmartFallback(query) {
     isFallback: true,
     candidates, // UI 会渲染为可点击按钮
     hints,
+  };
+}
+
+// 5 段式症状响应：关注确认 + 简介原因 + 居家护理 + 就医红线 + 免责声明
+function buildSymptomResponse(entry, intent) {
+  const homeCareList = (entry.homeCare || [])
+    .map((c) => `<li>${c}</li>`).join("");
+  const seeDoctorList = (entry.seeDoctor || [])
+    .map((s) => `<li>${s}</li>`).join("");
+  const severityLabel = entry.severity === "mild" ? "多为轻度、可居家观察"
+    : entry.severity === "assess" ? "需结合具体表现评估"
+    : entry.severity === "emergency" ? "需紧急评估"
+    : "需评估";
+
+  const answer = `
+    <p>👋 <strong>关注到您的提问，"${entry.question.replace(/？\?$/, "")}"</strong> 是较常见的日常不适，${severityLabel}。下面为您梳理一些<strong>科普信息与居家护理思路</strong>，并说明哪些情况需要尽快就医。</p>
+    ${entry.answer}
+    <p><strong>🏠 可尝试的居家护理建议（非药物方法）：</strong></p>
+    <ul>${homeCareList || "<li>调整作息与饮食，观察 1-2 周复诊情况</li>"}</ul>
+    <p><strong>⚠️ 出现以下情况请尽快就医：</strong></p>
+    <ul>${seeDoctorList || "<li>症状持续或加重</li><li>影响日常生活</li>"}</ul>
+    <p><strong>📌 重要说明：</strong>以上内容基于公开权威医学资料整理，<strong>仅作健康科普，不构成医疗诊断或治疗建议</strong>。如您存在慢性疾病、正在用药或症状持续不缓解，请以执业医师面诊评估为准。</p>
+  `;
+  return {
+    answer,
+    sources: entry.sources || [],
+    category: entry.category,
+    isSymptom: true,
+    intent,
+  };
+}
+
+// 孕产期咨询边界响应：共情 + 边界声明 + 推荐产科 + 紧急信号提示 + 免责
+function buildPregnancyResponse(intent) {
+  return {
+    answer: `<p>👋 <strong>感谢您的信任</strong>，您能关注到孕产期的饮食与生活细节，本身就是对家人和宝宝非常负责任的态度。</p>
+      <p><strong>📌 边界说明：</strong>本系统覆盖的是常见疾病的循证科普，<strong>不提供孕期、哺乳期、备孕期的医疗、用药或饮食建议</strong>。孕期生理变化复杂，个体差异大（如妊娠糖尿病、子痫前期、过敏史、用药史等都会影响判断），任何网络信息都无法替代专业评估。</p>
+      <p><strong>🩺 强烈建议您：</strong></p>
+      <ul>
+        <li>前往<strong>正规医院产科或妇产科</strong>面诊，由产科医师结合孕周、产检指标、个人病史给出针对性建议；</li>
+        <li>如已有建档产检医院，可拨打<strong>产科咨询电话</strong>或直接询问主治医师；</li>
+        <li>紧急情况下（见下方红线）请<strong>立即拨打 120</strong>或前往就近急诊。</li>
+      </ul>
+      <p><strong>⚠️ 孕期紧急信号（出现以下情况请立即就医）：</strong></p>
+      <ul>
+        <li>阴道流血、流液（疑似破水）</li>
+        <li>持续剧烈腹痛、规律宫缩（未足月）</li>
+        <li>胎动明显减少或消失</li>
+        <li>头痛伴视物模糊、上腹痛、水肿加重（警惕子痫前期）</li>
+        <li>持续呕吐无法进食饮水、高热</li>
+      </ul>
+      <p><strong>📌 重要说明：</strong>本回复仅作边界提示与就医引导，<strong>不构成任何医疗建议</strong>。请以执业产科医师面诊评估为准。</p>`,
+    sources: [
+      { name: "WHO：孕产妇健康", url: "https://www.who.int/zh/health-topics/maternal-health" },
+      { name: "国家卫健委：母婴安全", url: "http://www.nhc.gov.cn/" },
+    ],
+    category: "孕产期",
+    isPregnancyBoundary: true,
+    intent,
   };
 }
 
@@ -231,17 +333,30 @@ export async function askMedicalQuestion(query) {
     };
   }
 
+  // 孕产期咨询：明确边界，直接返回就医引导，不进入 KB 检索
+  if (intent.type === "pregnancy") {
+    return {
+      ok: true,
+      data: {
+        question: trimmed,
+        ...buildPregnancyResponse(intent),
+      },
+      usage: consume.usage,
+    };
+  }
+
   // 5. 检索 Top-3 候选
   const scored = searchKnowledge(trimmed, 3);
 
-  // 完全无匹配 → 智能化 fallback
+  // 完全无匹配 → 智能化 fallback（先尝试实时检索，失败则本地推荐）
   if (scored.length === 0) {
+    const fallbackResult = await buildSmartFallbackAsync(trimmed);
     return {
       ok: true,
       data: {
         question: trimmed,
         intent,
-        ...buildSmartFallback(trimmed),
+        ...fallbackResult,
       },
       usage: consume.usage,
     };
@@ -253,6 +368,17 @@ export async function askMedicalQuestion(query) {
   const highConfidence = top.score >= 5 && (!second || top.score - second.score >= 2);
 
   if (highConfidence) {
+    // 症状库条目 → 用 5 段式响应框架（关注确认 + 简介原因 + 居家护理 + 就医红线 + 免责）
+    if (top.entry.category === "日常症状") {
+      return {
+        ok: true,
+        data: {
+          question: trimmed,
+          ...buildSymptomResponse(top.entry, intent),
+        },
+        usage: consume.usage,
+      };
+    }
     return {
       ok: true,
       data: {

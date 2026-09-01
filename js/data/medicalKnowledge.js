@@ -6,6 +6,7 @@
 import { hepatobiliaryKB } from "./kb/kbHepatobiliary.js";
 import { clinicalKB } from "./kb/kbClinical.js";
 import { specialtyKB } from "./kb/kbSpecialties.js";
+import { symptomKB } from "./kb/kbSymptoms.js";
 
 const coreKB = [
   {
@@ -419,8 +420,8 @@ const coreCategoryMap = {
 };
 const coreEntries = coreKB.map((e) => (coreCategoryMap[e.id] ? { ...e, category: coreCategoryMap[e.id] } : e));
 
-// 合并全库：肝胆外科条目置于最前（重点强化方向），其余按核心→内科系统→专科排列
-export const medicalKB = [...hepatobiliaryKB, ...coreEntries, ...clinicalKB, ...specialtyKB];
+// 合并全库：肝胆外科条目置于最前（重点强化方向），其余按核心→内科系统→专科→日常症状排列
+export const medicalKB = [...hepatobiliaryKB, ...coreEntries, ...clinicalKB, ...specialtyKB, ...symptomKB];
 
 // 兜底回答 / fallback
 export const fallbackResponse = {

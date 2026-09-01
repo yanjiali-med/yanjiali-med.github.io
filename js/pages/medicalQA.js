@@ -146,6 +146,10 @@ export function renderMedicalQA(root) {
     div.className = "mqa__msg mqa__msg--bot";
     // 紧急情况使用醒目红色边框
     if (opts.isEmergency) div.classList.add("mqa__msg--emergency");
+    // 孕产期边界响应：紫色边框（区别于紧急红色）
+    if (opts.isPregnancyBoundary) div.classList.add("mqa__msg--boundary");
+    // 实时检索响应：青色边框（区别于本地 KB 命中）
+    if (opts.isRealtime) div.classList.add("mqa__msg--realtime");
     const catBadge = category ? `<span class="mqa__category">${category}</span>` : "";
     // 候选条目按钮（澄清 / fallback 时展示，点击直接进入该问题）
     const candidatesBlock = opts.candidates && opts.candidates.length
@@ -169,20 +173,81 @@ export function renderMedicalQA(root) {
     const disclaimer = opts.isEmergency
       ? `<p class="muted" style="font-size:var(--fs-xs);margin-top:var(--space-2);margin-bottom:0;border-top:1px dashed var(--color-border-strong);padding-top:var(--space-2);color:var(--color-warn-700)">⚠️ 紧急情况请立即拨打 120，本系统信息不得延误救治。</p>`
       : `<p class="muted" style="font-size:var(--fs-xs);margin-top:var(--space-2);margin-bottom:0;border-top:1px dashed var(--color-border-strong);padding-top:var(--space-2)">⚠️ 仅供参考，不构成诊疗建议。紧急情况请拨打 120。</p>`;
-    div.innerHTML = `<div class="mqa__msg-avatar" aria-hidden="true">🩺</div><div class="mqa__msg-bubble">${catBadge}${intentBadge}${html}${candidatesBlock}${sourcesBlock}${disclaimer}</div>`;
+
+    // 反馈组件：5 星评分 + 修正建议输入（紧急情况不展示）
+    const feedbackBlock = opts.isEmergency ? "" : `
+      <div class="mqa__feedback" data-q="${escapeHtml(opts.question || "")}">
+        <div class="mqa__feedback-row">
+          <span class="mqa__feedback-label">这条回答对您有帮助吗？</span>
+          <div class="mqa__stars" role="radiogroup" aria-label="评分">
+            ${[1, 2, 3, 4, 5].map((n) => `<span class="mqa__star" data-v="${n}" role="radio" aria-label="${n} 星" tabindex="0">☆</span>`).join("")}
+          </div>
+        </div>
+        <div class="mqa__feedback-text" hidden>
+          <textarea class="mqa__feedback-input" rows="2" placeholder="可补充：希望增加哪些内容 / 哪里不准确（选填，最多 200 字）" maxlength="200"></textarea>
+          <button class="mqa__feedback-submit" type="button">提交反馈</button>
+        </div>
+        <div class="mqa__feedback-thanks" hidden>✓ 感谢您的反馈，已记录用于改进回答质量。</div>
+      </div>`;
+
+    div.innerHTML = `<div class="mqa__msg-avatar" aria-hidden="true">🩺</div><div class="mqa__msg-bubble">${catBadge}${intentBadge}${html}${candidatesBlock}${sourcesBlock}${disclaimer}${feedbackBlock}</div>`;
     messagesEl.append(div);
+
     // 候选按钮点击 → 直接发起该问题
     if (opts.candidates && opts.candidates.length) {
       div.querySelectorAll(".mqa__kb-item").forEach((btn) => {
         btn.addEventListener("click", () => handleAsk(btn.dataset.q));
       });
     }
+
+    // 反馈交互：悬停/点击星星 + 提交反馈
+    if (!opts.isEmergency && opts.question) {
+      bindFeedback(div, opts.question);
+    }
+
     scrollBottom();
+  }
+
+  // 反馈交互绑定：星星悬停 + 评分 + 提交
+  function bindFeedback(msgEl, question) {
+    const stars = msgEl.querySelectorAll(".mqa__star");
+    const textWrap = msgEl.querySelector(".mqa__feedback-text");
+    const input = msgEl.querySelector(".mqa__feedback-input");
+    const submit = msgEl.querySelector(".mqa__feedback-submit");
+    const thanks = msgEl.querySelector(".mqa__feedback-thanks");
+    let selected = 0;
+
+    function paint(n) {
+      stars.forEach((s, i) => { s.textContent = i < n ? "★" : "☆"; s.classList.toggle("is-on", i < n); });
+    }
+    stars.forEach((s, i) => {
+      s.addEventListener("mouseenter", () => paint(i + 1));
+      s.addEventListener("mouseleave", () => paint(selected));
+      s.addEventListener("click", () => {
+        selected = i + 1;
+        paint(selected);
+        if (textWrap.hidden) textWrap.hidden = false;
+      });
+      s.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); s.click(); }
+      });
+    });
+    submit?.addEventListener("click", () => {
+      if (selected === 0) { submit.textContent = "请先选评分"; setTimeout(() => submit.textContent = "提交反馈", 1500); return; }
+      const comment = input?.value?.trim() || "";
+      // 调用 realtimeQA 的 saveFeedback
+      import("../utils/realtimeQA.js").then(({ saveFeedback }) => {
+        saveFeedback({ question, rating: selected, comment });
+        textWrap.hidden = true;
+        thanks.hidden = false;
+        msgEl.querySelectorAll(".mqa__star").forEach((s) => s.style.pointerEvents = "none");
+      });
+    });
   }
 
   // 意图类型 → 中文标签
   function intentLabel(type) {
-    const map = { disease_info: "疾病咨询", symptom_check: "症状自查", medication: "用药咨询", emergency: "紧急情况", general: "通用" };
+    const map = { disease_info: "疾病咨询", symptom_check: "症状自查", medication: "用药咨询", emergency: "紧急情况", pregnancy: "孕产期边界", general: "通用" };
     return map[type] || "通用";
   }
 
@@ -253,9 +318,12 @@ export function renderMedicalQA(root) {
     } else {
       const d = res.data;
       addBotMessage(d.answer, d.sources, d.category, {
+        question: d.question || currentQ,
         isEmergency: d.isEmergency,
+        isPregnancyBoundary: d.isPregnancyBoundary,
         isClarify: d.isClarify,
         isFallback: d.isFallback,
+        isRealtime: d.isRealtime,
         candidates: d.candidates,
         intent: d.intent,
       });
