@@ -1,0 +1,120 @@
+/* ============================================================
+   医疗专业风格设计系统 / Medical Professional Design System
+   色彩方案：蓝色系为主（传达专业、信任），辅以中性色
+   ============================================================ */
+
+:root {
+  /* ---- 主色调：医疗蓝 ---- */
+  --color-primary-50: #eaf2fb;
+  --color-primary-100: #d4e4f7;
+  --color-primary-200: #a9c9ef;
+  --color-primary-300: #6f9fe0;
+  --color-primary-400: #3a78c9;
+  --color-primary-500: #1d56a8;  /* 主色 */
+  --color-primary-600: #15468a;
+  --color-primary-700: #103772;
+  --color-primary-800: #0b2856;
+  --color-primary-900: #071a3d;
+
+  /* ---- 强调色：生命绿（健康/积极信号） ---- */
+  --color-accent-50: #ecfdf4;
+  --color-accent-100: #d1fae5;
+  --color-accent-400: #34d399;
+  --color-accent-500: #10b981;
+  --color-accent-600: #059669;
+  --color-accent-700: #047857;
+
+  /* ---- 警示色：用于免责声明与提醒 ---- */
+  --color-warn-50: #fffbeb;
+  --color-warn-100: #fef3c7;
+  --color-warn-500: #f59e0b;
+  --color-warn-600: #d97706;
+  --color-warn-700: #b45309;
+
+  /* ---- 中性色 ---- */
+  --color-bg: #f7f9fc;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f1f5fa;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+
+  --color-text: #1e293b;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748b;
+  --color-text-invert: #f8fafc;
+
+  /* 渐变 */
+  --gradient-primary: linear-gradient(135deg, #1d56a8 0%, #15468a 50%, #0b2856 100%);
+  --gradient-hero: linear-gradient(135deg, #071a3d 0%, #103772 40%, #1d56a8 100%);
+  --gradient-accent: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --gradient-soft: linear-gradient(180deg, #ffffff 0%, #eaf2fb 100%);
+
+  /* ---- 排版 ---- */
+  --font-sans: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Noto Serif SC", Georgia, "Times New Roman", serif;
+
+  --fs-xs: 0.75rem;   /* 12px */
+  --fs-sm: 0.875rem;  /* 14px */
+  --fs-base: 1rem;    /* 16px */
+  --fs-md: 1.125rem;  /* 18px */
+  --fs-lg: 1.25rem;   /* 20px */
+  --fs-xl: 1.5rem;    /* 24px */
+  --fs-2xl: 2rem;     /* 32px */
+  --fs-3xl: 2.5rem;   /* 40px */
+  --fs-4xl: 3.25rem;  /* 52px */
+
+  --lh-tight: 1.2;
+  --lh-normal: 1.6;
+  --lh-loose: 1.8;
+
+  /* ---- 间距系统（8px基准） ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+
+  /* ---- 圆角 ---- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+
+  /* ---- 阴影 ---- */
+  --shadow-xs: 0 1px 2px rgba(7, 26, 61, 0.06);
+  --shadow-sm: 0 2px 8px rgba(7, 26, 61, 0.08);
+  --shadow-md: 0 8px 24px rgba(7, 26, 61, 0.10);
+  --shadow-lg: 0 18px 48px rgba(7, 26, 61, 0.16);
+  --shadow-focus: 0 0 0 3px rgba(29, 86, 168, 0.35);
+
+  /* ---- 布局 ---- */
+  --container-max: 1200px;
+  --container-narrow: 820px;
+  --nav-height: 72px;
+
+  /* ---- 动效 ---- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 0.18s;
+  --dur-base: 0.32s;
+  --dur-slow: 0.6s;
+
+  /* ---- z-index 层级 ---- */
+  --z-nav: 100;
+  --z-overlay: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+  }
+}
