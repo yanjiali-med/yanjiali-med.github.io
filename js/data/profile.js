@@ -26,7 +26,6 @@ export const profile = {
   stats: [
     { value: "150+", label: "科普项目问卷" },
     { value: "2次", label: "脑卒中宣讲" },
-    { value: "1篇", label: "蒙药论文（在编）" },
   ],
   overview: [
     "闫佳俐，内蒙古医科大学临床医学专业五年制本科在读。系统学习解剖学、生理学、病理学、药理学、诊断学及内外妇儿等核心课程，注重将循证医学(Evidence-Based Medicine)思维贯穿学习全过程。",

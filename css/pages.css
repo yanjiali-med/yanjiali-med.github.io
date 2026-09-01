@@ -691,6 +691,52 @@
   border-radius: var(--radius-pill);
   margin-bottom: var(--space-2);
 }
+/* 意图标签（增强可解释性） */
+.mqa__intent {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border-strong);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  margin: 0 0 var(--space-2) var(--space-2);
+  cursor: help;
+}
+/* 候选条目按钮容器（澄清 / fallback 时展示） */
+.mqa__candidates {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+.mqa__candidates .mqa__kb-item {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary-500);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-xs);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.mqa__candidates .mqa__kb-item:hover {
+  border-left-color: var(--color-primary-700);
+  background: var(--color-primary-50);
+  transform: translateX(2px);
+}
+/* 紧急消息：红色边框，醒目 */
+.mqa__msg--emergency .mqa__msg-bubble {
+  background: var(--color-warn-50, #fef2f2);
+  border: 2px solid var(--color-warn-600, #dc2626);
+  animation: mqaPulse 1.2s ease-in-out 2;
+}
+@keyframes mqaPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+}
 .mqa__citation {
   margin-top: var(--space-2);
   padding: var(--space-2) var(--space-3);

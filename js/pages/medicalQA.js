@@ -141,10 +141,24 @@ export function renderMedicalQA(root) {
     scrollBottom();
   }
 
-  function addBotMessage(html, sources, category) {
+  function addBotMessage(html, sources, category, opts = {}) {
     const div = document.createElement("div");
     div.className = "mqa__msg mqa__msg--bot";
+    // 紧急情况使用醒目红色边框
+    if (opts.isEmergency) div.classList.add("mqa__msg--emergency");
     const catBadge = category ? `<span class="mqa__category">${category}</span>` : "";
+    // 候选条目按钮（澄清 / fallback 时展示，点击直接进入该问题）
+    const candidatesBlock = opts.candidates && opts.candidates.length
+      ? `<div class="mqa__candidates">
+           ${opts.candidates.map((e) => `<button class="mqa__kb-item" type="button" data-q="${escapeHtml(e.question)}">
+             <span class="mqa__kb-cat">${escapeHtml(e.category)}</span>${escapeHtml(e.question)}
+           </button>`).join("")}
+         </div>`
+      : "";
+    // 意图标签（增强可解释性）
+    const intentBadge = opts.intent && opts.intent.type
+      ? `<span class="mqa__intent" title="${escapeHtml(opts.intent.reason || "")}">意图：${escapeHtml(intentLabel(opts.intent.type))}</span>`
+      : "";
     const sourcesBlock = sources && sources.length
       ? `<div class="mqa__sources">
            <div class="mqa__sources-title">📚 权威来源</div>
@@ -152,10 +166,24 @@ export function renderMedicalQA(root) {
            <div class="mqa__citation"><strong>引用格式：</strong><code>${sources.map((s, i) => formatCitation(s, i + 1)).join("  ")}</code></div>
          </div>`
       : "";
-    const disclaimer = `<p class="muted" style="font-size:var(--fs-xs);margin-top:var(--space-2);margin-bottom:0;border-top:1px dashed var(--color-border-strong);padding-top:var(--space-2)">⚠️ 仅供参考，不构成诊疗建议。紧急情况请拨打 120。</p>`;
-    div.innerHTML = `<div class="mqa__msg-avatar" aria-hidden="true">🩺</div><div class="mqa__msg-bubble">${catBadge}${html}${sourcesBlock}${disclaimer}</div>`;
+    const disclaimer = opts.isEmergency
+      ? `<p class="muted" style="font-size:var(--fs-xs);margin-top:var(--space-2);margin-bottom:0;border-top:1px dashed var(--color-border-strong);padding-top:var(--space-2);color:var(--color-warn-700)">⚠️ 紧急情况请立即拨打 120，本系统信息不得延误救治。</p>`
+      : `<p class="muted" style="font-size:var(--fs-xs);margin-top:var(--space-2);margin-bottom:0;border-top:1px dashed var(--color-border-strong);padding-top:var(--space-2)">⚠️ 仅供参考，不构成诊疗建议。紧急情况请拨打 120。</p>`;
+    div.innerHTML = `<div class="mqa__msg-avatar" aria-hidden="true">🩺</div><div class="mqa__msg-bubble">${catBadge}${intentBadge}${html}${candidatesBlock}${sourcesBlock}${disclaimer}</div>`;
     messagesEl.append(div);
+    // 候选按钮点击 → 直接发起该问题
+    if (opts.candidates && opts.candidates.length) {
+      div.querySelectorAll(".mqa__kb-item").forEach((btn) => {
+        btn.addEventListener("click", () => handleAsk(btn.dataset.q));
+      });
+    }
     scrollBottom();
+  }
+
+  // 意图类型 → 中文标签
+  function intentLabel(type) {
+    const map = { disease_info: "疾病咨询", symptom_check: "症状自查", medication: "用药咨询", emergency: "紧急情况", general: "通用" };
+    return map[type] || "通用";
   }
 
   function showTyping() {
@@ -223,8 +251,15 @@ export function renderMedicalQA(root) {
     if (!res.ok) {
       addBotMessage(`<p><strong>提示：</strong>${escapeHtml(res.message)}</p>`, [], null);
     } else {
-      addBotMessage(res.data.answer, res.data.sources, res.data.category);
-      pushHistory(q, res.data.category || "通用");
+      const d = res.data;
+      addBotMessage(d.answer, d.sources, d.category, {
+        isEmergency: d.isEmergency,
+        isClarify: d.isClarify,
+        isFallback: d.isFallback,
+        candidates: d.candidates,
+        intent: d.intent,
+      });
+      pushHistory(q, d.category || "通用");
     }
   }
 

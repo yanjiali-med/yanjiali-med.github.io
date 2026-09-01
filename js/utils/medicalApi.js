@@ -1,52 +1,188 @@
 // 医疗问答 API 模拟 / Medical Q&A API Simulator
 // 功能：
-// 1. 基于关键词匹配在循证医学知识库中检索相关条目
-// 2. 模拟网络延迟与"模型思考"过程
-// 3. 集成请求限流机制防止滥用
-// 4. 隐私保护：不存储用户问题内容，仅本地记录请求时间戳
+// 1. 意图识别：区分疾病咨询 / 症状自查 / 用药咨询 / 紧急情况
+// 2. 多阶段检索：关键词 + 问题文本 + 模糊匹配，返回 Top-3 候选
+// 3. 低置信度澄清：返回多个候选让用户选择，而非直接 fallback
+// 4. 紧急症状识别：胸痛 / 呼吸困难 / 意识改变 / 严重出血等 → 立即提示 120
+// 5. 智能化 fallback：从原问题提取关键词，主动推荐相关条目
+// 6. 限流与隐私保护：不存储问题内容，仅本地时间戳
 
 import { medicalKB, fallbackResponse } from "../data/medicalKnowledge.js";
 import { tryConsume, getUsage } from "./rateLimiter.js";
 
-// 简体中文分词：按非汉字/字母字符切分，并保留 2 字以上词
+// ===== 分词 =====
+// 按非汉字/字母字符切分，保留 2 字以上词，并保留连续中文片段
 function tokenize(text) {
   const cleaned = text.toLowerCase().replace(/[，。？！、,.?!；:()\[\]{}""'']/g, " ");
   const tokens = cleaned.split(/\s+/).filter(Boolean);
-  // 同时加入连续中文片段
   const cnChunks = (text.match(/[\u4e00-\u9fa5]{2,}/g) || []);
   return Array.from(new Set([...tokens, ...cnChunks]));
 }
 
-// 计算查询与知识条目的匹配分数
+// ===== 意图识别 =====
+// 返回 { type, reason }，type ∈ disease_info | symptom_check | medication | emergency | general
+const EMERGENCY_PATTERNS = [
+  { kw: ["胸痛", "胸闷痛", "心绞痛", "chest pain"], reason: "胸痛可能为急性心肌梗死等危重情况" },
+  { kw: ["呼吸困难", "喘不上气", "气促", "憋气", "呼吸停止"], reason: "呼吸困难可能危及生命" },
+  { kw: ["意识改变", "意识丧失", "昏迷", "晕厥", "叫不醒", "昏睡"], reason: "意识障碍需立即评估" },
+  { kw: ["大出血", "严重出血", "大量出血", "止血不止", "喷射出血"], reason: "严重出血需立即止血就医" },
+  { kw: ["抽搐", "癫痫发作", "惊厥", "全身抽"], reason: "抽搐发作需紧急处理" },
+  { kw: ["卒中", "中风", "偏瘫", "口角歪斜", "言语不清", "BE-FAST"], reason: "卒中时间窗内可溶栓/取栓" },
+  { kw: ["窒息", "异物卡喉", "气道梗阻"], reason: "气道梗阻可数分钟致命" },
+  { kw: ["过敏休克", "过敏性休克", "喉头水肿"], reason: "严重过敏反应需肾上腺素" },
+  { kw: ["服毒", "自杀", "吃药自杀", "吞服"], reason: "立即中毒救治" },
+  { kw: ["心跳骤停", "心脏骤停", "猝死"], reason: "立即 CPR 并呼叫 120" },
+];
+
+const SYMPTOM_HINTS = ["怎么办", "怎么处理", "怎么回事", "是什么原因", "为什么", "是不是", "严重吗", "需要治吗", "要看医生吗"];
+const MEDICATION_HINTS = ["药", "吃", "服用", "剂量", "用量", "怎么用", "能吃", "可以吃", "副作用", "禁忌"];
+
+function detectIntent(query) {
+  const q = query.toLowerCase();
+  // 紧急情况优先
+  for (const p of EMERGENCY_PATTERNS) {
+    if (p.kw.some((k) => q.includes(k.toLowerCase()))) {
+      return { type: "emergency", reason: p.reason, hit: p.kw.find((k) => q.includes(k.toLowerCase())) };
+    }
+  }
+  // 用药咨询
+  if (MEDICATION_HINTS.some((h) => q.includes(h))) {
+    return { type: "medication", reason: "涉及用药咨询" };
+  }
+  // 症状自查
+  if (SYMPTOM_HINTS.some((h) => q.includes(h))) {
+    return { type: "symptom_check", reason: "症状自查类问题" };
+  }
+  return { type: "disease_info", reason: "疾病知识咨询" };
+}
+
+// ===== 评分 =====
+// 单条目相对查询的匹配分：综合关键词、问题文本、模糊子串
 function scoreEntry(entry, query) {
+  const qLower = query.toLowerCase();
   const queryTokens = tokenize(query);
   let score = 0;
+  let hitKws = [];
+
+  // 1) 关键词匹配
   for (const kw of entry.keywords) {
     const kwLower = kw.toLowerCase();
-    // 全词匹配权重高
-    if (queryTokens.some((t) => t === kwLower)) score += 3;
-    // 部分包含
-    else if (queryTokens.some((t) => t.includes(kwLower) || kwLower.includes(t))) score += 1.5;
-    // 原始查询直接包含关键词
-    if (query.toLowerCase().includes(kwLower)) score += 2;
+    let kwHit = false;
+    if (queryTokens.some((t) => t === kwLower)) { score += 3; kwHit = true; }
+    else if (queryTokens.some((t) => t.includes(kwLower) || kwLower.includes(t))) { score += 1.5; kwHit = true; }
+    if (qLower.includes(kwLower)) { score += 2; kwHit = true; }
+    if (kwHit) hitKws.push(kw);
   }
-  return score;
+
+  // 2) 问题文本匹配（之前未利用）
+  const entryQLower = entry.question.toLowerCase();
+  for (const t of queryTokens) {
+    if (t.length >= 2 && entryQLower.includes(t)) score += 2;
+  }
+
+  // 3) 分类名匹配
+  if (entry.category && qLower.includes(entry.category.toLowerCase())) score += 1;
+
+  return { entry, score, hitKws };
 }
 
-// 检索最匹配条目
-export function searchKnowledge(query) {
+// 检索 Top-N 候选（默认 3）
+export function searchKnowledge(query, topN = 3) {
   const scored = medicalKB
-    .map((entry) => ({ entry, score: scoreEntry(entry, query) }))
+    .map((entry) => scoreEntry(entry, query))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score);
-
-  if (scored.length === 0) return null;
-  return scored[0].entry;
+  if (scored.length === 0) return [];
+  return scored.slice(0, topN);
 }
 
-// 模拟异步问答请求
+// 从原 query 提取候选关键词，供 fallback 推荐
+function extractHintKeywords(query) {
+  const tokens = tokenize(query).filter((t) => t.length >= 2);
+  // 取与知识库关键词部分匹配的 tokens
+  const hints = new Set();
+  for (const t of tokens) {
+    for (const entry of medicalKB) {
+      for (const kw of entry.keywords) {
+        if (kw.toLowerCase().includes(t) || t.includes(kw.toLowerCase())) {
+          hints.add(kw);
+          break;
+        }
+      }
+    }
+  }
+  return Array.from(hints).slice(0, 5);
+}
+
+// 智能化 fallback：基于原 query 提取关键词，主动推荐候选条目
+function buildSmartFallback(query) {
+  const hints = extractHintKeywords(query);
+  // 用关键词做一次宽松搜索，取最多 3 条作为"您可能想问"
+  const candidates = [];
+  const seen = new Set();
+  for (const kw of hints) {
+    const hits = searchKnowledge(kw, 3);
+    for (const h of hits) {
+      if (!seen.has(h.entry.id)) {
+        seen.add(h.entry.id);
+        candidates.push(h.entry);
+      }
+      if (candidates.length >= 3) break;
+    }
+    if (candidates.length >= 3) break;
+  }
+  return {
+    answer: `<p>抱歉，您的问题在当前知识库中暂未找到直接匹配的循证条目。</p>
+      <p>本系统覆盖 22 大临床科室常见疾病的科普，可尝试：</p>
+      <ul>
+        <li>使用更具体的疾病名或症状关键词（如"胆囊结石""高血压管理"）；</li>
+        <li>在右侧<strong>分类浏览</strong>中按科室查找；</li>
+        <li>在右侧<strong>关键词搜索</strong>输入关键词查看相关条目。</li>
+      </ul>
+      <p>以下是根据您输入提取的相关主题，供参考${candidates.length ? "（点击可直接查看）" : ""}：</p>`,
+    sources: fallbackResponse.sources,
+    category: "通用",
+    isFallback: true,
+    candidates, // UI 会渲染为可点击按钮
+    hints,
+  };
+}
+
+// 紧急情况响应
+function buildEmergencyResponse(reason, hit) {
+  return {
+    answer: `<p><strong>⚠️ 检测到可能紧急的健康关键词："${hit}"</strong></p>
+      <p>${reason}，此类情况可能危及生命，<strong>请立即拨打 120</strong>或前往就近急诊，切勿因本系统信息延误救治。</p>
+      <ul>
+        <li>心跳骤停：立即 CPR（胸外按压 + 人工通气），有 AED 配合 AED；</li>
+        <li>窒息/异物卡喉：海姆立克手法（成人腹部冲击）；</li>
+        <li>严重出血：直接压迫止血，必要时止血带；</li>
+        <li>卒中：记发病时间，时间窗内可溶栓/取栓。</li>
+      </ul>
+      <p>稳定生命体征后，可参考本系统相关条目了解疾病知识，但<strong>所有处置须以现场急救人员与医师评估为准</strong>。</p>`,
+    sources: [
+      { name: "AHA 心肺复苏指南", url: "https://cpr.heart.org/" },
+      { name: "国家急救中心 120", url: "tel:120" },
+    ],
+    category: "急诊",
+    isEmergency: true,
+  };
+}
+
+// 低置信度澄清：返回 Top-3 让用户选
+function buildClarifyResponse(query, candidates) {
+  return {
+    answer: `<p>您的问题可能涉及以下主题，请选择最贴近您需求的一项，以获得更精准的回答：</p>`,
+    sources: [],
+    category: "澄清",
+    isClarify: true,
+    candidates, // UI 渲染为按钮
+  };
+}
+
+// ===== 主入口 =====
 export async function askMedicalQuestion(query) {
-  // 1. 限流检查
+  // 1. 限流
   const consume = tryConsume();
   if (!consume.allowed) {
     return {
@@ -63,7 +199,7 @@ export async function askMedicalQuestion(query) {
     return {
       ok: false,
       error: "too_short",
-      message: "请输入更完整的问题（至少 2 个字符）。",
+      message: "请输入更完整的问题（至少 2 个字符）。例如：高血压如何管理？",
       usage: consume.usage,
     };
   }
@@ -76,35 +212,73 @@ export async function askMedicalQuestion(query) {
     };
   }
 
-  // 3. 模拟模型"思考"延迟（隐私保护：仅本地无网络外发）
-  const delay = 900 + Math.random() * 700;
+  // 3. 模拟"思考"延迟（隐私：仅本地）
+  const delay = 700 + Math.random() * 600;
   await new Promise((r) => setTimeout(r, delay));
 
-  // 4. 检索知识库
-  const entry = searchKnowledge(trimmed);
+  // 4. 意图识别（紧急情况优先短路）
+  const intent = detectIntent(trimmed);
 
-  if (!entry) {
+  if (intent.type === "emergency") {
     return {
       ok: true,
       data: {
         question: trimmed,
-        answer: fallbackResponse.answer,
-        sources: fallbackResponse.sources,
-        category: "通用",
-        isFallback: true,
+        intent,
+        ...buildEmergencyResponse(intent.reason, intent.hit),
       },
       usage: consume.usage,
     };
   }
 
+  // 5. 检索 Top-3 候选
+  const scored = searchKnowledge(trimmed, 3);
+
+  // 完全无匹配 → 智能化 fallback
+  if (scored.length === 0) {
+    return {
+      ok: true,
+      data: {
+        question: trimmed,
+        intent,
+        ...buildSmartFallback(trimmed),
+      },
+      usage: consume.usage,
+    };
+  }
+
+  // 6. 置信度判定：最高分 ≥ 5 且明显高于第二名 → 直接回答；否则澄清
+  const top = scored[0];
+  const second = scored[1];
+  const highConfidence = top.score >= 5 && (!second || top.score - second.score >= 2);
+
+  if (highConfidence) {
+    return {
+      ok: true,
+      data: {
+        question: trimmed,
+        intent,
+        answer: top.entry.answer,
+        sources: top.entry.sources,
+        category: top.entry.category,
+        isFallback: false,
+        confidence: top.score,
+        hitKws: top.hitKws,
+      },
+      usage: consume.usage,
+    };
+  }
+
+  // 低置信度 → 返回候选让用户选择
   return {
     ok: true,
     data: {
       question: trimmed,
-      answer: entry.answer,
-      sources: entry.sources,
-      category: entry.category,
-      isFallback: false,
+      intent,
+      ...buildClarifyResponse(
+        trimmed,
+        scored.map((s) => s.entry)
+      ),
     },
     usage: consume.usage,
   };
@@ -114,12 +288,10 @@ export { getUsage };
 
 // ===== 知识库浏览辅助（供分类浏览 / 关键词搜索 UI 使用） =====
 
-// 按科室分类获取条目
 export function getEntriesByCategory(category) {
   return medicalKB.filter((e) => e.category === category);
 }
 
-// 简单关键词过滤搜索（匹配问题、关键词标签与分类名）
 export function searchEntries(query, limit = 8) {
   const q = (query || "").trim().toLowerCase();
   if (q.length < 1) return [];

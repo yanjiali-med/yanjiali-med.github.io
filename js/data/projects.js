@@ -14,18 +14,6 @@ export const projects = [
     links: [{ label: "项目详情", url: "#", icon: "📄" }],
   },
   {
-    id: "mongolian-medicine-paper",
-    title: "蒙药相关研究论文（编写中）",
-    type: "paper",
-    typeLabel: "学术论文",
-    image: "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=network%20pharmacology%20compound%20target%20network%20diagram%20with%20molecular%20structures%20and%20laboratory%20mice%20research%20scientific%20blue%20illustration&image_size=landscape_4_3",
-    description: "一篇关于蒙药的研究论文（在编写中），研究方法结合网络药理学「干实验」与小鼠「湿实验」：通过网络药理学筛选活性成分、预测作用靶点与信号通路，再经动物实验进行验证。",
-    role: "学生作者（导师指导）：参与文献调研、网络药理学分析与实验数据整理。",
-    outcome: "论文正在撰写中。",
-    stack: ["网络药理学", "干实验", "小鼠湿实验", "文献检索", "数据整理"],
-    links: [{ label: "研究进展", url: "#", icon: "📄" }],
-  },
-  {
     id: "probiotics-rhinitis",
     title: "益生菌辅助治疗过敏性鼻炎的相关研究",
     type: "research",
@@ -66,6 +54,5 @@ export const projects = [
 export const projectTypes = [
   { key: "all", label: "全部" },
   { key: "research", label: "科研项目" },
-  { key: "paper", label: "学术论文" },
   { key: "practice", label: "数字健康" },
 ];

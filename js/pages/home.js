@@ -178,7 +178,7 @@ export function renderHome(root) {
           <span class="section__eyebrow">Projects &amp; Research</span>
           <h2 class="section__title">项目与科研速览</h2>
         </div>
-        <p class="text-center muted" style="margin-bottom:var(--space-6)">中风120/BE-FAST 科普项目、蒙药研究论文、益生菌研究、临床数据收集等，详见<a href="#/portfolio" data-route="#/portfolio">项目与科研页</a>。</p>
+        <p class="text-center muted" style="margin-bottom:var(--space-6)">中风120/BE-FAST 科普项目、益生菌研究、临床数据收集等，详见<a href="#/portfolio" data-route="#/portfolio">项目与科研页</a>。</p>
         <div class="text-center">
           <a class="btn btn--primary" href="#/portfolio" data-route="#/portfolio">查看全部项目与科研</a>
         </div>
