@@ -9,7 +9,7 @@
 
 import { medicalKB, fallbackResponse } from "../data/medicalKnowledge.js";
 import { tryConsume, getUsage } from "./rateLimiter.js";
-import { fetchRealtimeInfo, buildRealtimeAnswer, logQuery, findRelatedFeedback } from "./realtimeQA.js";
+import { fetchRealtimeInfo, buildRealtimeAnswer, logQuery, findRelatedFeedback, fetchRealtimeInfoMulti, buildMultiSourceAnswer } from "./realtimeQA.js";
 
 // ===== 分词 =====
 // 按非汉字/字母字符切分，保留 2 字以上词，并保留连续中文片段
@@ -138,9 +138,27 @@ function extractHintKeywords(query) {
 // 智能化 fallback：基于原 query 提取关键词，主动推荐候选条目
 // 低置信度时先尝试实时检索（Wikipedia），失败再用本地 fallback 推荐
 async function buildSmartFallbackAsync(query) {
-  // 1. 先尝试实时检索
+  // 1. 智能意图识别 → 选源
+  const intent = detectIntent(query);
+  const intentType = intent.type; // emergency/medication/symptom_check/disease_info
+
+  // 2. 多源并行实时检索（2.5s 超时，PubMed + Wikipedia + 按意图选 OpenFDA）
   try {
-    const realtime = await fetchRealtimeInfo(query, 4000);
+    const multiResult = await fetchRealtimeInfoMulti(query, intentType, 2500);
+    if (multiResult.ok) {
+      const answer = buildMultiSourceAnswer(query, multiResult);
+      if (answer) {
+        logQuery(query, "realtime_multi");
+        return answer;
+      }
+    }
+  } catch {
+    // 多源失败 → 降级到本地推荐
+  }
+
+  // 3. 兼容旧路径：仅 Wikipedia 单源（备用，确保至少有一源尝试）
+  try {
+    const realtime = await fetchRealtimeInfo(query, 2500);
     if (realtime.ok) {
       const realtimeAnswer = buildRealtimeAnswer(query, realtime);
       if (realtimeAnswer) {
@@ -152,7 +170,7 @@ async function buildSmartFallbackAsync(query) {
     // 实时检索失败 → 降级到本地推荐
   }
 
-  // 2. 本地 fallback 推荐
+  // 4. 本地 fallback 推荐
   logQuery(query, "fallback");
   return buildLocalFallback(query);
 }
@@ -174,11 +192,39 @@ function buildLocalFallback(query) {
     }
     if (candidates.length >= 3) break;
   }
+
+  // 智能居家建议：从症状库中按 hints 关键词匹配相关条目，提炼通用居家护理要点
+  let homeTips = [];
+  if (hints.length) {
+    const symptomHits = medicalKB
+      .filter((e) => e.category === "日常症状" && (e.homeCare || []).length)
+      .map((e) => {
+        let score = 0;
+        for (const kw of hints) {
+          if (e.keywords.some((k) => k.includes(kw) || kw.includes(k.toLowerCase()))) score++;
+        }
+        return { e, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (symptomHits.length) {
+      // 取最相关症状条目的前 3 条居家建议作为"通用参考"
+      homeTips = symptomHits[0].e.homeCare.slice(0, 3);
+    }
+  }
+
+  const tipsBlock = homeTips.length
+    ? `<p><strong>💡 通用居家护理参考</strong>（来自相关症状条目，非针对您的具体情况）：</p>
+       <ul>${homeTips.map((t) => `<li>${t}</li>`).join("")}</ul>
+       <p>⚠️ 以上为通用建议，<strong>如症状持续或加重、伴任何警示征象请尽快就医</strong>。</p>`
+    : "";
+
   return {
     answer: `<p>抱歉，您的问题在当前知识库中暂未找到直接匹配的循证条目。</p>
+      ${tipsBlock}
       <p>本系统覆盖 22 大临床科室常见疾病的科普，可尝试：</p>
       <ul>
-        <li>使用更具体的疾病名或症状关键词（如"胆囊结石""高血压管理"）；</li>
+        <li>使用更具体的疾病名或症状关键词（如「胆囊结石」「高血压管理」）；</li>
         <li>在右侧<strong>分类浏览</strong>中按科室查找；</li>
         <li>在右侧<strong>关键词搜索</strong>输入关键词查看相关条目。</li>
       </ul>
@@ -314,8 +360,8 @@ export async function askMedicalQuestion(query) {
     };
   }
 
-  // 3. 模拟"思考"延迟（隐私：仅本地）
-  const delay = 700 + Math.random() * 600;
+  // 3. 模拟"思考"延迟（隐私：仅本地，缩短以提升体验）
+  const delay = 300 + Math.random() * 300;
   await new Promise((r) => setTimeout(r, delay));
 
   // 4. 意图识别（紧急情况优先短路）

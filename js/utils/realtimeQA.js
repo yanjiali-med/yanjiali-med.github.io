@@ -93,6 +93,244 @@ export async function fetchRealtimeInfo(query, timeoutMs = 4000) {
   }
 }
 
+// ===== 多源 A：PubMed E-utilities（文献摘要，作为延伸阅读） =====
+// 文档：https://www.ncbi.nlm.nih.gov/books/NBK25499/
+// CORS 允许 ✅，无需 API key（限 3 次/秒/IP），返回 JSON
+
+const PUBMED_EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
+
+// 步骤 1：ESearch 获取 PMID 列表
+async function searchPubMed(term, limit = 3) {
+  const url = `${PUBMED_EUTILS}/esearch.fcgi?db=pubmed&term=${encodeURIComponent(term)}&retmode=json&retmax=${limit}&tool=yanjiali-med-site&email=contact@example.com`;
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error(`PubMed ESearch HTTP ${res.status}`);
+  const data = await res.json();
+  return data?.esearchresult?.idlist || [];
+}
+
+// 步骤 2：ESummary 获取文献标题与摘要链接
+async function fetchPubMedSummary(pmids) {
+  if (!pmids.length) return [];
+  const url = `${PUBMED_EUTILS}/esummary.fcgi?db=pubmed&id=${pmids.join(",")}&retmode=json&tool=yanjiali-med-site`;
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error(`PubMed ESummary HTTP ${res.status}`);
+  const data = await res.json();
+  return pmids.map((id) => {
+    const doc = data?.result?.[id];
+    if (!doc) return null;
+    return {
+      pmid: id,
+      title: doc.title || "",
+      authors: (doc.authors || []).map((a) => a.name).join(", "),
+      journal: doc.fulljournalname || doc.source || "",
+      pubdate: doc.pubdate || "",
+      url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`,
+    };
+  }).filter(Boolean);
+}
+
+// PubMed 主入口
+export async function fetchPubMedArticles(query, limit = 3, timeoutMs = 2500) {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const pmids = await searchPubMed(query, limit);
+    if (!pmids.length) { clearTimeout(timer); return { ok: false, error: "no_result" }; }
+    const articles = await fetchPubMedSummary(pmids);
+    clearTimeout(timer);
+    if (!articles.length) return { ok: false, error: "no_summary" };
+    return { ok: true, source: "pubmed", articles, query };
+  } catch (err) {
+    return { ok: false, error: err.name === "AbortError" ? "timeout" : "fetch_error", message: err.message };
+  }
+}
+
+// ===== 多源 B：OpenFDA（药品不良反应 + 药品说明书） =====
+// 文档：https://open.fda.gov/apis/
+// CORS 允许 ✅，无需 API key（限 1000 次/天/IP）
+const OPENFDA_BASE = "https://api.fda.gov";
+
+// 拉取某药品的不良反应 Top-N（聚合统计）
+export async function fetchOpenFDADrugInfo(drugName, timeoutMs = 2500) {
+  if (!drugName) return { ok: false, error: "no_drug" };
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    // 1. 不良反应 Top 5（按 MedDRA 术语聚合）
+    const eventUrl = `${OPENFDA_BASE}/drug/event.json?search=patient.drug.openfda.generic_name:${encodeURIComponent(drugName)}&count=patient.reaction.reactionmeddrapt.exact&limit=5`;
+    const eventRes = await fetch(eventUrl);
+    let reactions = [];
+    if (eventRes.ok) {
+      const eventData = await eventRes.json();
+      reactions = (eventData?.results || []).map((r) => ({ term: r.term, count: r.count }));
+    }
+
+    // 2. 药品说明书（用途、警告）
+    const labelUrl = `${OPENFDA_BASE}/drug/label.json?search=openfda.generic_name:${encodeURIComponent(drugName)}&limit=1`;
+    const labelRes = await fetch(labelUrl);
+    let label = null;
+    if (labelRes.ok) {
+      const labelData = await labelRes.json();
+      const r = labelData?.results?.[0];
+      if (r) {
+        label = {
+          purpose: r.purpose?.[0] || r.indications_and_usage?.[0]?.slice(0, 200) || "",
+          warnings: r.warnings_and_cautions?.[0]?.slice(0, 300) || "",
+          brandNames: r.openfda?.brand_name?.slice(0, 3) || [],
+        };
+      }
+    }
+
+    clearTimeout(timer);
+    if (!reactions.length && !label) return { ok: false, error: "no_result" };
+    return { ok: true, source: "openfda", drugName, reactions, label };
+  } catch (err) {
+    return { ok: false, error: err.name === "AbortError" ? "timeout" : "fetch_error", message: err.message };
+  }
+}
+
+// ===== 缓存：5 分钟减少重复请求（localStorage，仅缓存成功结果） =====
+const CACHE_KEY = "mqa_realtime_cache";
+const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+
+function readCache() {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || "{}"); } catch { return {}; }
+}
+
+function writeCache(obj) {
+  try {
+    const keys = Object.keys(obj);
+    // 仅保留最近 30 条，避免 localStorage 膨胀
+    const trimmed = keys.slice(-30).reduce((acc, k) => { acc[k] = obj[k]; return acc; }, {});
+    localStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
+  } catch {}
+}
+
+function cacheGet(key) {
+  const c = readCache();
+  const item = c[key];
+  if (!item) return null;
+  if (Date.now() - item.ts > CACHE_TTL) return null;
+  return item.data;
+}
+
+function cacheSet(key, data) {
+  const c = readCache();
+  c[key] = { data, ts: Date.now() };
+  writeCache(c);
+}
+
+// 综合实时检索：按意图选源 + 缓存 + 多源并行
+export async function fetchRealtimeInfoMulti(query, intentType = "disease_info", timeoutMs = 2500) {
+  const cacheKey = `${intentType}:${query}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return { ok: true, ...cached, fromCache: true };
+
+  // 按意图选源
+  const tasks = [];
+  // 主源：Wikipedia（所有意图都用，提供百科背景）
+  tasks.push(fetchRealtimeInfo(query, timeoutMs).then((r) => ({ kind: "wiki", r })));
+  // 备源 A：PubMed（疾病/症状咨询时拉延伸阅读文献）
+  if (intentType === "disease_info" || intentType === "symptom_check") {
+    tasks.push(fetchPubMedArticles(query, 3, timeoutMs).then((r) => ({ kind: "pubmed", r })));
+  }
+  // 备源 B：OpenFDA（用药咨询时拉药品不良反应与说明书）
+  if (intentType === "medication") {
+    // 从 query 提取药品名（粗略：取最长中文片段）
+    const { mainEntity } = analyzeQuestion(query);
+    if (mainEntity) {
+      tasks.push(fetchOpenFDADrugInfo(mainEntity, timeoutMs).then((r) => ({ kind: "openfda", r })));
+    }
+  }
+
+  // 并行执行，等待所有完成（部分失败不影响其他源）
+  const results = await Promise.allSettled(tasks);
+  const valid = [];
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value?.r?.ok) {
+      valid.push(r.value);
+    }
+  }
+
+  if (!valid.length) return { ok: false, error: "all_sources_failed" };
+
+  // 整合多源结果
+  const merged = {
+    ok: true,
+    query,
+    intent: intentType,
+    sources: {},
+  };
+  for (const { kind, r } of valid) {
+    if (kind === "wiki") {
+      merged.sources.wiki = { title: r.title, extract: r.extract, url: r.url };
+      merged.analysis = r.analysis;
+    } else if (kind === "pubmed") {
+      merged.sources.pubmed = r.articles.map((a) => ({ title: a.title, url: a.url, journal: a.journal, pubdate: a.pubdate }));
+    } else if (kind === "openfda") {
+      merged.sources.openfda = { drugName: r.drugName, reactions: r.reactions, label: r.label };
+    }
+  }
+
+  cacheSet(cacheKey, merged);
+  return merged;
+}
+
+// 多源结果 → 合成回答（与 buildRealtimeAnswer 兼容，但更丰富）
+export function buildMultiSourceAnswer(query, multiResult) {
+  if (!multiResult.ok) return null;
+
+  const { sources } = multiResult;
+  const parts = [];
+
+  parts.push(`<p>🔍 <strong>本地知识库未直接命中，已为您从多个权威医学源实时检索</strong>：</p>`);
+
+  // 主源 Wikipedia 百科
+  if (sources.wiki) {
+    const plain = (sources.wiki.extract || "").replace(/\n/g, " ").trim();
+    parts.push(`<p><strong>${sources.wiki.title}</strong>（来源：维基百科）：${plain}</p>`);
+  }
+
+  // 备源 OpenFDA（药品不良反应）
+  if (sources.openfda) {
+    const { drugName, reactions, label } = sources.openfda;
+    parts.push(`<p><strong>💊 ${drugName} 药品信息</strong>（来源：美国 FDA）：</p>`);
+    if (label?.purpose) parts.push(`<p><strong>用途</strong>：${label.purpose}</p>`);
+    if (reactions?.length) {
+      const reactList = reactions.map((r) => `${r.term}（${r.count} 报告）`).join("、");
+      parts.push(`<p><strong>常见不良反应</strong>（按报告数排序）：${reactList}</p>`);
+    }
+    if (label?.warnings) parts.push(`<p><strong>⚠️ 警告</strong>：${label.warnings}</p>`);
+  }
+
+  // 备源 PubMed（延伸阅读）
+  if (sources.pubmed?.length) {
+    parts.push(`<p><strong>📚 延伸阅读</strong>（来源：PubMed 文献索引）：</p><ul>`);
+    for (const a of sources.pubmed.slice(0, 3)) {
+      parts.push(`<li><a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a> <span class="muted">— ${a.journal} ${a.pubdate}</span></li>`);
+    }
+    parts.push(`</ul>`);
+  }
+
+  // 整合来源
+  const sourcesArr = [];
+  if (sources.wiki) sourcesArr.push({ name: `维基百科：${sources.wiki.title}`, url: sources.wiki.url || "https://zh.wikipedia.org/" });
+  if (sources.openfda) sourcesArr.push({ name: `OpenFDA：${sources.openfda.drugName}`, url: "https://open.fda.gov/" });
+  if (sources.pubmed?.length) sourcesArr.push({ name: "PubMed 文献检索", url: "https://pubmed.ncbi.nlm.nih.gov/" });
+
+  parts.push(`<p>📌 <strong>重要说明</strong>：以上内容来自多个开放权威源，<strong>仅作背景知识参考，并非循证医学指南</strong>。涉及具体诊疗、用药决策时，请<strong>以执业医师面诊评估为准</strong>。</p>`);
+
+  return {
+    answer: parts.join(""),
+    sources: sourcesArr,
+    category: "实时检索",
+    isRealtime: true,
+    isMultiSource: true,
+    realtimeQuery: query,
+  };
+}
+
 // ===== 回答生成：合成结构化回复 =====
 export function buildRealtimeAnswer(query, realtimeResult) {
   if (!realtimeResult.ok) return null;

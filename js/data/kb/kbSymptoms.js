@@ -235,4 +235,45 @@ export const symptomKB = [
       { name: "Mayo Clinic：Headache", url: "https://www.mayoclinic.org/symptoms/headache" },
     ],
   },
+  {
+    id: "dizziness-morning",
+    category: "日常症状",
+    keywords: ["头晕", "头晕目眩", "早上头晕", "晨起头晕", "睡醒头晕", "起床头晕", "眩晕", "头昏", "站起来头晕", "体位性头晕", "dizziness", "vertigo"],
+    question: "早上睡醒起床头晕怎么办？",
+    severity: "assess",
+    answer: `<p><strong>晨起头晕</strong>是非常常见的主诉，多数为良性、可经生活调整改善，但少数可能提示重要疾病，需结合伴随症状判断。</p>
+    <p><strong>常见原因</strong>：</p>
+    <ul>
+      <li><strong>体位性低血压</strong>（最常见）：起床过快，血液来不及泵上脑，出现一过性眼前发黑或头晕，数秒内缓解；</li>
+      <li><strong>低血糖</strong>：晚餐过早、夜间过长或糖尿病患者，伴出汗、心慌、手抖；</li>
+      <li><strong>脱水</strong>：夜间出汗多、饮水少、室内干燥；</li>
+      <li><strong>睡眠不足 / 睡眠质量差</strong>：熬夜、睡眠呼吸暂停；</li>
+      <li><strong>颈椎相关</strong>：颈椎病致椎动脉供血受影响，转头时明显；</li>
+      <li><strong>耳石症 / 前庭疾病</strong>：头晕伴天旋地转感（眩晕），与体位变化明显相关；</li>
+      <li><strong>血压异常</strong>：高血压或低血压均可致头晕；</li>
+      <li><strong>贫血</strong>：伴乏力、面色苍白、活动后心悸。</li>
+    </ul>`,
+    homeCare: [
+      "起床「三个 30 秒」：醒后躺 30 秒 → 床边坐 30 秒 → 站 30 秒再走，避免体位性低血压",
+      "晨起先喝一杯温水（200ml）补充夜间失水，预防脱水与低血压",
+      "保证早餐规律，含碳水化合物与蛋白质（如全麦面包+鸡蛋），预防低血糖",
+      "记录头晕规律：发生时间、持续多久、是否伴视物旋转/出汗/心慌，便于就医时描述",
+      "调整作息：保证 7-8 小时睡眠，避免熬夜和睡前长时间用手机",
+      "监测晨起血压（高血压或低血压均可致头晕），尤其 40 岁以上或有高血压家族史者",
+      "避免睡前饮酒与饱食，减少睡眠呼吸暂停风险",
+    ],
+    seeDoctor: [
+      "反复发作或持续不缓解（>1 周内多次发生）",
+      "伴天旋地转眩晕、呕吐、耳聋耳鸣（前庭/耳科疾病可能）",
+      "伴一侧肢体无力、口角歪斜、言语不清（卒中征象，立即就医）",
+      "伴胸痛、心悸、晕厥（心血管疾病可能）",
+      "伴明显贫血表现（乏力、面色苍白、心率快）",
+      "有糖尿病、高血压、心脏病基础者新发或加重",
+      "转头时头晕加重且伴上肢麻木（颈椎病可能）",
+    ],
+    sources: [
+      { name: "Mayo Clinic：Dizziness", url: "https://www.mayoclinic.org/diseases-conditions/dizziness" },
+      { name: "Merck Manual：眩晕", url: "https://www.merckmanuals.com/" },
+    ],
+  },
 ];
