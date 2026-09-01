@@ -11,13 +11,10 @@ export const profile = {
   enrollYear: 2022,                     // ⚠️
   expectedGrad: "2027 年 7 月",         // ⚠️ 五年制预期毕业
   studyStatus: "全日制在读",
-  cet6: 536,                            // 英语六级成绩（用户提供，真实）
-  cet6Date: "2024 年 6 月",
-  cet6Issuer: "全国大学英语四、六级考试委员会",
   location: "内蒙古医科大学 · 呼和浩特市",
   tagline: "内蒙古医科大学临床医学在读本科生，专注循证医学学习与医学科普，致力于用所学构建人人可信赖的医疗问答系统，让权威健康知识触手可及。",
-  avatar: "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=professional%20young%20female%20Chinese%20medical%20student%20in%20white%20coat%20with%20stethoscope%20confident%20warm%20smile%20university%20hospital%20blue%20background%20high%20quality%20portrait&image_size=portrait_4_3",
-  heroPortrait: "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=young%20female%20Chinese%20medical%20student%20wearing%20white%20coat%20stethoscope%20holding%20medical%20book%20modern%20teaching%20hospital%20blue%20tone%20professional%20headshot&image_size=portrait_16_9",
+  avatar: "assets/avatar.jpg",
+  heroPortrait: "assets/avatar.jpg",
   aboutImage: "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=medical%20student%20studying%20with%20open%20anatomy%20book%20laptop%20showing%20medical%20research%20stethoscope%20on%20desk%20bright%20modern%20library%20desk%20soft%20blue%20lighting&image_size=landscape_4_3",
   // 联系方式（用户提供，重点展示）
   email: "jialiyan543@gmail.com",
@@ -27,7 +24,6 @@ export const profile = {
   ],
   phone: "158****8090", // 已脱敏，完整号码不公开
   stats: [
-    { value: "536", label: "英语六级 CET-6" },
     { value: "150+", label: "科普项目问卷" },
     { value: "2次", label: "脑卒中宣讲" },
     { value: "1篇", label: "蒙药论文（在编）" },
@@ -71,7 +67,6 @@ export const profile = {
     {
       icon: "📜", title: "专业证书与语言",
       items: [
-        { name: "英语六级 CET-6 (536分)", level: "536", pct: 100 },
         { name: "全国计算机等级二级", level: "持证", pct: 100 },
         { name: "普通话水平测试 二甲", level: "持证", pct: 100 },
         { name: "AHA Heartsaver / BLS", level: "持证", pct: 100 },

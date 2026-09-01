@@ -161,7 +161,6 @@ export function renderHome(root) {
             <div class="key-facts">
               <span class="key-fact"><span class="muted">学校</span><strong>${profile.school}</strong></span>
               <span class="key-fact"><span class="muted">专业</span><strong>${profile.major}</strong></span>
-              <span class="key-fact cet"><span class="muted">英语六级</span><strong class="cet6">536 分</strong></span>
             </div>
             <div class="about__actions" style="margin-top:var(--space-5);display:flex;gap:var(--space-4);flex-wrap:wrap">
               <a class="btn btn--primary" href="#/portfolio" data-route="#/portfolio">项目与科研 →</a>

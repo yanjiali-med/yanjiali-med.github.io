@@ -644,7 +644,7 @@
 @media (max-width: 860px) { .adv-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .adv-grid { grid-template-columns: 1fr; } }
 
-/* 个人简介：关键事实 + CET-6 醒目徽章 */
+/* 个人简介：关键事实 */
 .key-facts { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
 .key-fact {
   display: inline-flex; flex-direction: column; gap: 2px;
@@ -655,9 +655,6 @@
 }
 .key-fact .muted { font-size: var(--fs-xs); }
 .key-fact strong { font-size: var(--fs-sm); color: var(--color-primary-700); }
-.key-fact.cet { background: var(--color-accent-50); border-color: var(--color-accent-100); }
-.key-fact.cet .muted { color: var(--color-accent-600); }
-.key-fact.cet strong { color: var(--color-accent-700); font-size: var(--fs-md); }
 
 /* ============================================================
    面包屑导航 / Breadcrumb
